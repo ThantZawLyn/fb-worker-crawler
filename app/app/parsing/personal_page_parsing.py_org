@@ -1,0 +1,132 @@
+import re
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
+
+from .. import logger
+from ..database import DBSession
+from ..database.models import UserJob, UserUniversity
+from ..utils.url_utils import get_param
+
+
+class Organisation:
+    def __init__(self, name, link, info):
+        self.name = name
+        self.link = link
+        self.info = info
+
+
+def parse_personal_page(browser, subtask_personal_data):
+    user = subtask_personal_data.user
+    logger.log("Start parse personal data link: {}".format(user.link))
+    browser.get(user.link)
+
+    user.fb_id = get_fb_id(browser)
+    open_about_tab(browser, "about")
+    open_about_tab(browser, "contact-info")
+
+    user.sex = get_data_by_xpath(browser, "sex", "//span[text()='Gender']/../../div/div/div/span")
+    user.birthday = get_data_by_xpath(browser, "birthday", "//span[text()='Birthday']/../../div/div/div/span")
+
+    open_about_tab(browser, "living")
+    user.current_city = get_data_by_xpath(browser, "current city", "//li[@id='current_city']//a")
+    user.city_of_birth = get_data_by_xpath(browser, "home city", "//li[@id='hometown']//a")
+
+    open_about_tab(browser, "education")
+
+    jobs = parse_organisations(browser, "Work")
+    for job in jobs:
+        DBSession.add(UserJob(name=job.name, info=job.info, link=job.link, user=user))
+
+    universities = parse_organisations(browser, "Education")
+    for university in universities:
+        DBSession.add(UserUniversity(name=university.name, info=university.info, link=university.link, user=user))
+
+    DBSession.commit()
+
+
+def parse_organisations(browser, type):
+    def get_links():
+        try:
+            logger.log("Search {}".format(type))
+            links = WebDriverWait(browser, 5).until(
+                ec.presence_of_all_elements_located(
+                    (By.XPATH, "//span[text()='" + type + "' and @role='heading']/../..//li//a[not(./img)]")))
+            logger.log("find: {}".format(str(len(links))))
+            return links
+        except Exception as e:
+            logger.exception("{} doesn't find".format(type), e)
+            return []
+
+    def get_organisation(link):
+        try:
+            info = link.find_element(By.XPATH, ".//../../div/div").text
+            return Organisation(link=link.get_attribute("href"), name=link.text, info=info)
+        except Exception as e:
+            logger.exception("Info doesn't find", e)
+            return None
+
+    organisations = []
+    for link in get_links():
+        organisation = get_organisation(link)
+        if organisation:
+            organisations.append(organisation)
+    return organisations
+
+
+def open_about_tab(browser, tab_name):
+    try:
+        logger.log_alive()
+        logger.log("open {} tab".format(tab_name))
+        WebDriverWait(browser, 3).until(ec.presence_of_element_located((By.CSS_SELECTOR, "a[href*=" + tab_name + "]")))
+        browser.execute_script("document.querySelector('a[href*=" + tab_name + "]').click()")
+    except Exception as e:
+        logger.exception("{} doesn't find".format(tab_name), e)
+
+
+def get_data_by_xpath(browser, label, xpath):
+    try:
+        logger.log("Search {}".format(label))
+        item = WebDriverWait(browser, 3) \
+            .until(ec.presence_of_element_located((By.XPATH, xpath))).text
+        logger.log("{} find: {}".format(label, item))
+        return item
+    except Exception as e:
+        logger.exception("{} link a doesn't find".format(label), e)
+    return None
+
+
+def get_fb_id(browser):
+    def get_id_from_meta(browser):
+        try:
+            logger.log("Search user fb_id from meta")
+            element_content = WebDriverWait(browser, 3) \
+                .until(ec.presence_of_element_located((By.XPATH, "//meta[@property='al:ios:url']"))) \
+                .get_attribute("content")
+            fb_id = re.findall('\\d+', element_content)[0]
+            logger.log("from link {} has extracted fb_id: {}".format(element_content, fb_id))
+            return fb_id
+        except Exception as e:
+            logger.exception("Couldn't extract fb_id", e)
+        return None
+
+    def get_id_from_href(browser):
+        try:
+            logger.log("Search user fb_id from href")
+            href = WebDriverWait(browser, 3) \
+                .until(ec.presence_of_element_located((By.XPATH, "//a[contains(@href, '?page_id=')"))) \
+                .get_attribute("href")
+
+            fb_id = get_param(href, 'page_id')
+            logger.log("from link {} has extracted fb_id: {}".format(href, fb_id))
+            return fb_id
+        except Exception as e:
+            logger.exception("Couldn't extract fb_id", e)
+        return None
+
+    fb_id = get_id_from_meta(browser)
+    if not fb_id:
+        return get_id_from_href(browser)
+    else:
+        return fb_id
