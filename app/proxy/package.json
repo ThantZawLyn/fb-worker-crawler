@@ -1,0 +1,12 @@
+{
+  "name": "fbs_proxy",
+  "version": "1.0.0",
+  "main": "proxy.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "proxy-chain": "^0.4.4"
+  }
+}
