@@ -82,8 +82,9 @@ def parse_source_post(browser, post, task_id):
             #source post id rebuild in this function
             dataft = post.get_attribute("data-store")
             features = eval(dataft)
-            post_id = features["share_id"]
-
+            post_i = features["share_id"]
+            post_ic = str(post_i)
+            post_id = str(post_ic.replace('226547524203272:', ''))
             logger.log("Post id: {}.".format(post_id))
             return post_id
         except:
