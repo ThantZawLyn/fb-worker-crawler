@@ -47,8 +47,7 @@ jobs:
         id: test-action
         uses: ./
         with:
-          who-to-greet: Thant Zaw Lynn
-
+          who-to-greet:  Mona Lisa Octocat
       - name: Print Output
         id: output
         run: echo "${{ steps.test-action.outputs.greeting }}"
