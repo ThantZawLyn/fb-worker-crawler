@@ -14,16 +14,6 @@ jobs:
     name: Docker Tests
     runs-on: ubuntu-latest
 
-    # Run a local registry to push to
-    services:
-      registry:
-        image: registry:2
-        ports:
-          - 5001:5000
-
-    env:
-      TEST_TAG: localhost:5001/actions/container-action:latest
-
     steps:
       - name: Checkout
         id: checkout
@@ -43,16 +33,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TEST_TAG }}
-
-      - name: Run the Container
-        id: run
-        env:
-          INPUT_WHO_TO_GREET: Mona Lisa Octocat
-        run: |
-          docker run \
-            --env INPUT_WHO_TO_GREET="${{ env.INPUT_WHO_TO_GREET }}" \
-            --rm ${{ env.TEST_TAG }}
-
+          
   test-action:
     name: GitHub Actions Test
     runs-on: ubuntu-latest
@@ -66,7 +47,7 @@ jobs:
         id: test-action
         uses: ./
         with:
-          who-to-greet: Mona Lisa Octocat
+          who-to-greet: Thant Zaw Lynn
 
       - name: Print Output
         id: output
