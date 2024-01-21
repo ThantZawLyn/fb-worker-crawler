@@ -6,7 +6,7 @@ on:
       checkout:
         type: string
         description: Branch to Checkout
-        default: master
+        default: main
 
 env:
   REGISTRY: ghcr.io
