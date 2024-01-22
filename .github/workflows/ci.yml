@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
       - name: Setup Docker BuildX
         id: setup-buildx
@@ -28,7 +28,7 @@ jobs:
 
       - name: Build the Container
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v4
         with:
           context: .
           push: true
@@ -41,13 +41,7 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
-
-      - name: Test Local Action
-        id: test-action
-        uses: ./
-        with:
-          who-to-greet:  Mona Lisa Octocat
+        uses: actions/checkout@v5
       - name: Print Output
         id: output
         run: echo "${{ steps.test-action.outputs.greeting }}"
