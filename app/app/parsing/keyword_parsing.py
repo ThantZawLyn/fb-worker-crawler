@@ -60,11 +60,12 @@ def parse_keyword(browser, task_keyword):
             logger.exception("post_ids couldn't be parsed", e)
 
 #    source_url = FACEBOOK_URL + task_source.source_id
- #   source_url = FACEBOOK_URL_MOBILE_SEARCH_KEYWORD + task_keyword.keyword
+   # source_url = FACEBOOK_URL_MOBILE_SEARCH_KEYWORD + task_keyword.keyword
     source_url = "https://www.facebook.com/permalink.php?story_fbid=122137645670021505&id=61550645170136"
-    browser.get(source_url)
+
+    browser.get(source_url)    
     sleep(3)
-    logger.log(f'Get {source_url}')
+    logger.log(f'Get {source_url}')   
     a = WebDriverWait(browser, 30).until(ec.presence_of_element_located((By.XPATH, f"//a[contains(text(),'100064704638095')]")))
     a.click()
     sleep(1)
@@ -80,6 +81,15 @@ def parse_keyword(browser, task_keyword):
     sleep(2)
     d.send_keys(Keys.RETURN)
     sleep(1)
+    e = WebDriverWait(browser, 30).until(ec.presence_of_element_located((By.XPATH, "//a[contains(text(),'Posts')]")))
+    e.click()
+    sleep(2)
+
+    browser.get(source_url)
+    logger.log(f'Get {source_url}')
+
+    sleep(1)
+
     if browser.current_url != source_url:
         logger.log('Current url was redirected from {} to {}'.format(source_url, browser.current_url))
 
@@ -92,74 +102,97 @@ def parse_post_keyword(browser, post, task_id):
         try:
             logger.log("Getting post id")
             #source post id rebuild in this function
-            dataft = post.get_attribute("data-ft")
+            dataft = post.get_attribute("data-store")
             features = eval(dataft)
-            post_id = features["top_level_post_id"]
-
-            logger.log("Post id: {}.".format(post_id))
+            post_i = features["share_id"]
+            post_ic = str(post_i)
+            post_ie = str(post_ic.replace('226547524203272:', ''))
+            logger.log("Post unclean_id: {}.".format(post_ie))
+            pattern = r"\^M0;\^s([^-]+)-"
+            match1 = re.search(pattern, post_ie)
+            post_id = match1.group(1) if match1 else post_ie
+            logger.log("Post clean_id: {}.".format(post_id))
             return post_id
         except:
             logger.log("Post id not found")
         return None
     
-    
+      
     def get_user(post):
         user = User()
         try:
             logger.log("Getting user data")
-            user_element = post.find_element_by_xpath(".//div//strong//a[@class]")
+            user_element = post.find_element_by_xpath(".//div//strong//a")
             user.name = user_element.text
             user.link = trim_full_link(user_element.get_attribute("href"))
-            dataft = post.get_attribute("data-ft")
-            features = eval(dataft)
-            user.fb_id = features["content_owner_id_new"]
-            #user.fb_id = get_fb_id(user_element, user.link)
+            user_element_id = post.find_element_by_xpath("//div[@class='_67lm _77kc']")
+            dataft = user_element_id.get_attribute("data-sigil")
+            user.fb_id = dataft.replace('feed_story_ring', '')
+            #features = eval(dataft)
+            #user.fb_id = features["content_owner_id_new"]
+            #user.fb_id = task_source.source_name
+            logger.log("User name: {} - link {} - fb_id: {}".format(user.name, user.link, user.fb_id))
+            #user.fb_id = task_source.source_name
+           # user.fb_id = get_fb_id(user_element, user.link)
 
             saved_user = get_user_by_fb_id(user.fb_id)
             if saved_user:
                 return saved_user
-
-            logger.log("User name: {} - link {} - fb_id: {}".format(user.name, user.link, user.fb_id))
         except:
             logger.log("User not found")
         return user
-
     
     def get_text(post):
         logger.log("Getting post text")
-        sleep(1)
+        sleep(3)
         more_button_click(post)
         try:            
-            #post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']//span[@data-sigil='expose']")
             post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']/div[@class='_5rgt _5nk5 _5msi']//p")
             post_text="\n".join([post_text.text for post_text in post_text_root])
-            logger.log("Post text: {}".format(post_text))
+            logger.log("Post text: \033[34m{}\033[0m".format(post_text))
             return post_text
         except:
             logger.log("Text doesn't found")
-        return None    
+        return None  
     
             
     def more_button_click(post):        
         try:
-            more_link = WebDriverWait(post, 2).until(ec.presence_of_element_located((By.XPATH,".//span[@data-sigil='more']//a[contains(text(),'More')]")))
+            more_link = WebDriverWait(post, 5).until(ec.presence_of_element_located((By.XPATH,".//span[@data-sigil='more']//a[contains(text(),'More')]")))
             #more_link = post.find_elements(By.XPATH,".//span[@data-sigil='more']//a[contains(text(),'More')]")
             logger.log("Click more button")
             more_link.click()
         except:
             logger.log("No more button")
-    
-    '''def get_text(post):
+
+    """def get_text(post):
         try:
             logger.log("Getting post text")
-            post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']//span/p")
+            post_text_root= post.find_elements(By.XPATH, ".//div//span[@data-sigil='expose']")
+            #post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']//span/p")
             post_text="\n".join([post_text.text for post_text in post_text_root])
             logger.log("Post text: {}".format(post_text))
             return post_text
         except:
             logger.log("Text doesn't found")
-        return None'''
-       
+        return None"""
+    '''def more_button_click(post_text):
+            try:
+                more_link = post_text.find_element(By.CSS_SELECTOR, ".see_more_link")
+                logger.log("Click more button")
+                more_link.click()
+            except:
+                logger.log("No more button")
+        try:
+            logger.log("Getting post text")
+            post_text_root = post.find_element(By.CSS_SELECTOR, ".userContent")
+            more_button_click(post_text_root)
+            post_text = post_text_root.text
+            logger.log("Post text: {}".format(post_text))
+            return post_text
+        except:
+            logger.log("Text doesn't found")
+        return None'''    
 
     def get_videos(browser, post):
         try:
@@ -230,7 +263,7 @@ def parse_post_keyword(browser, post, task_id):
         except:
             logger.log("Likes count doesn't found")
         return None
-         
+
     def extract_comments_str(post, fb_post_id):
         """Извлечение из поста элемента с количеством комментариев."""
         # TODO: refactor
@@ -270,35 +303,77 @@ def parse_post_keyword(browser, post, task_id):
         try:
             logger.log("Getting Comments count")
             comments = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[contains(text(), 'comment')]").text
+            #comments = post.find_element(By.XPATH, "//span[contains(text(), 'comment')]").text
+            #comments = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[1]").text
             logger.log("Comments retrieved: {}".format(comments))
-            comments_count = comments.split(" ")[0]
-            comments_count = string_count_to_int(comments_count)
+            #comments_count = comments.split(" ")[0]
+            comments_count = string_count_to_int(comments)
             logger.log("Comments count: {}".format(str(comments_count)))
             return str(comments_count)
         except:
             logger.log("Comments count doesn't found")
         return None
-
+    """def get_comment_text(post):
+        logger.log("Getting comment text")
+        comments = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[contains(text(), 'comment')]").text
+        if len(comments)>0:
+            click_button = post.find_element(By.XPATH, "//a[contains(text( ), 'Comment')]")
+            click_button.click()
+            comment_text_root = post.find_element(By.XPATH, "//div[@data-sigil = 'comment-body']//span")
+            comment_text="\n".join([comment_text.text for comment_text in comment_text_root])
+            logger.log("Comment text: {}".format(comment_text))
+            return comment_text
+        else:
+            logger.log("Comment Text doesn't found")
+            return None"""
+    """def more_button_click(post_text):
+            try:
+                more_link = post_text.find_element(By.CSS_SELECTOR, ".see_more_link")
+                logger.log("Click more button")
+                more_link.click()
+            except:
+                logger.log("No more button")
+        try:
+            logger.log("Getting post text")
+            post_text_root = post.find_element(By.CSS_SELECTOR, ".userContent")
+            more_button_click(post_text_root)
+            post_text = post_text_root.text
+            logger.log("Post text: {}".format(post_text))
+            return post_text
+        except:
+            logger.log("Text doesn't found")
+        return None """  
     """def get_post_link(fb_post_id):
         try:
-            logger.log("Getting post link")            
-            link = FACEBOOK_URL_MOBILE + fb_post_id
+            logger.log("Getting post target link")
+            link = FACEBOOK_URL_MOBILE + fb_post_id            
             logger.log("Link: {}".format(link))
-            return link
+            return link       
         except:
-            logger.log("Link doesn't found")
+            logger.log("Likes count doesn't found")
         return None"""
-        
-        
-    def get_post_link(fb_post_id):
+    
+    """def get_post_source_id(post):
         try:
             logger.log("Getting post_source id")
             dataft = post.get_attribute("data-ft")
             features = eval(dataft)
             source_id = features["content_owner_id_new"]
             logger.log("Source id: {}.".format(source_id))
+            return source_id
+        except:
+            logger.log("Source id not found")
+        return None"""
+     
+    def get_post_link(fb_post_id):
+        try:
+            logger.log("Getting post_source id")
+            user_element_id = post.find_element_by_xpath("//div[@class='_67lm _77kc']")
+            dataft = user_element_id.get_attribute("data-sigil")
+            source_id  = dataft.replace('feed_story_ring', '')
+            logger.log("Source id: {}.".format(source_id))
             logger.log("Getting post target link")
-            link = 'https://m.facebook.com/story.php?story_fbid=' + fb_post_id +'&id='+source_id
+            link = "https://m.facebook.com/story.php?story_fbid=" + fb_post_id +"&id="+source_id
             logger.log("Link: {}".format(link))
             return link        
         except:
@@ -309,15 +384,16 @@ def parse_post_keyword(browser, post, task_id):
         try:
             logger.log("Getting shares count")
             shares = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[contains(text(), 'hare')]").text
+            #shares = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[2]").text
             logger.log("Shares retrieved: {}".format(shares))
-            shares_count = shares.split(" ")[0]
-            shares_count = string_count_to_int(shares_count)
+            #shares_count = shares.split(" ")[0]
+            shares_count = string_count_to_int(shares)
             logger.log("Shares count: {}".format(str(shares_count)))
             return str(shares_count)
+           
         except:
             logger.log("Shares count doesn't found")
         return None
-        
     def get_views_count(post):
         try:
             logger.log("Getting views count")            
@@ -332,24 +408,24 @@ def parse_post_keyword(browser, post, task_id):
         except:
             logger.log("Not video post")
         return None
+    
     def get_views(url):
         logger.log("Getting views count")
         views_count = 0
         try:            
             #browser.execute_script("window.open('');")
-            browser.switch_to.window(browser.window_handles[1])
+            browser.switch_to.window(browser.window_handles[0])
             browser.get(url)
-            sleep(3)
-            views =  browser.find_element(By.XPATH, "//div[@class='x1n2xptk x16n37ib xq8finb x1y1aw1k xwib8y2']//div//div//div//span[contains(text(),'views')]|//div[@class='x1n2onr6']//div//div//div//span//span//div//div//span[contains(@class,'x193iq5w')]")        
+            sleep(1)
+            views =  browser.find_element(By.XPATH, "//div[contains(@class, 'x8cjs6t')]//div//div//div//span[contains(text(),'views')]|//div[@class='x1n2onr6']//div//div//div//span//span//div//div//span[contains(@class,'x193iq5w')]")        
             views_count = (views.text).split(" ")[0]
             views_count = string_count_to_int(views_count)
             logger.log("Views count: {}".format(str(views_count)))                    
         except:
             logger.log("Views couldn't be parsed")                                                                     
         #browser.close()
-        browser.switch_to.window(browser.window_handles[0])
+        browser.switch_to.window(browser.window_handles[1])
         return str(views_count)
-        
 
     def get_repost_id(post):
         try:
@@ -421,30 +497,33 @@ def parse_post_keyword(browser, post, task_id):
     if not post_obj:
         return None
 
-    stat = PostStat(likes=get_likes_count(post),                    
+    fb_post_id = get_fb_post_id(post)
+    stat = PostStat(likes=get_likes_count(post),
                     comments=get_comments_count(post),
-                    shares=get_shares_count(post))
-                    #views=get_views_count(post))
+                    shares=get_shares_count(post),
+                    views=get_views_count(post))
     if not post_obj.id:
         post_obj.fb_post_link = get_post_link(post_obj.fb_post_id)
         post_obj.fb_post_link_likes = get_likes_link(post_obj.fb_post_id)
         post_obj.user = get_user(post)
         post_obj.date = format(get_date_time_from_post(post))
         post_obj.content = Content(text=get_text(post))
+        #post_obj.content = Content(text=get_comment_text(post))
         post_obj.last_time_updated = datetime.now().isoformat()
         post_obj.task_id = task_id
         post_obj.stat = stat
 
-    #    fb_repost_id, fb_repost_link = get_repost_id(post)
-    #    post_obj.fb_repost_id = fb_repost_id
-    #    post_obj.fb_repost_link = fb_repost_link
+#         fb_repost_id, fb_repost_link = get_repost_id(post)
+#         post_obj.fb_repost_id = fb_repost_id
+#         post_obj.fb_repost_link = fb_repost_link
 
-    #    for v_link in get_videos(browser, post):
-    #        Video(content=post_obj.content, video_link=v_link)
+#         for v_link in get_videos(browser, post):
+#             Video(content=post_obj.content, video_link=v_link)
 
-    #    for p_link in get_photos(post):
-    #        Photo(content=post_obj.content, photo_link=p_link)
+#         for p_link in get_photos(post):
+#             Photo(content=post_obj.content, photo_link=p_link)
     else:
         update_post_stat(post_obj, stat)
+        update_task_id(fb_post_id, task_id)
 
     return post_obj
