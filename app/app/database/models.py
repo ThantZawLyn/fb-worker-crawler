@@ -102,13 +102,13 @@ class PostStat(Base):
     likes = Column('likes', VARCHAR(32))
     comments = Column('comments', VARCHAR(32))
     shares = Column('shares', VARCHAR(32))
-    #views = Column('views', VARCHAR(32))
+    views = Column('views', VARCHAR(32))
 
     post = relationship("Post", back_populates="stat", uselist=False)
 
     def is_equals(self, post_stat):
-        return self.likes == post_stat.likes and self.comments == post_stat.comments and self.shares == post_stat.shares
-        #return self.likes == post_stat.likes and self.comments == post_stat.comments and self.shares == post_stat.shares and self.views == post_stat.views
+        #return self.likes == post_stat.likes and self.comments == post_stat.comments and self.shares == post_stat.shares
+        return self.likes == post_stat.likes and self.comments == post_stat.comments and self.shares == post_stat.shares and self.views == post_stat.views
 
 
 class Content(Base):

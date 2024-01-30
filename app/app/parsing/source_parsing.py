@@ -57,7 +57,7 @@ def parse_source(browser, task_source):
             logger.exception("post_ids couldn't be parsed", e)
 
 #    source_url = FACEBOOK_URL + task_source.source_id
-    source_url = "https://www.facebook.com/permalink.php?story_fbid=122137135406021505&id=61550645170136"
+    source_url ="https://www.facebook.com/permalink.php?story_fbid=pfbid0ERisnVb3UNgQhdLmNeeqejWG1eit5Fn4HdhMzUhE9mZd8UNfHYYU6Es3TZVt6Zhyl&id=61550971700853"
     browser.get(source_url)
     sleep(1)
     #browser.execute_script("window.open('');")
@@ -84,8 +84,12 @@ def parse_source_post(browser, post, task_id):
             features = eval(dataft)
             post_i = features["share_id"]
             post_ic = str(post_i)
-            post_id = str(post_ic.replace('226547524203272:', ''))
-            logger.log("Post id: {}.".format(post_id))
+            post_ie = str(post_ic.replace('226547524203272:', ''))
+            logger.log("Post unclean_id: {}.".format(post_ie))
+            pattern = r"\^M0;\^s([^-]+)-"
+            match1 = re.search(pattern, post_ie)
+            post_id = match1.group(1) if match1 else post_ie
+            logger.log("Post clean_id: {}.".format(post_id))
             return post_id
         except:
             logger.log("Post id not found")
@@ -344,7 +348,7 @@ def parse_source_post(browser, post, task_id):
         views_count = 0
         try:            
             #browser.execute_script("window.open('');")
-            browser.switch_to.window(browser.window_handles[1])
+            browser.switch_to.window(browser.window_handles[0])
             browser.get(url)
             #sleep(3)
             views =  browser.find_element(By.XPATH, "//div[contains(@class, 'x8cjs6t')]//div//div//div//span[contains(text(),'views')]|//div[@class='x1n2onr6']//div//div//div//span//span//div//div//span[contains(@class,'x193iq5w')]")        
@@ -354,7 +358,7 @@ def parse_source_post(browser, post, task_id):
         except:
             logger.log("Views couldn't be parsed")                                                                     
         #browser.close()
-        browser.switch_to.window(browser.window_handles[0])
+        browser.switch_to.window(browser.window_handles[1])
         return str(views_count)
 
     def get_repost_id(post):
@@ -429,8 +433,8 @@ def parse_source_post(browser, post, task_id):
     fb_post_id = get_fb_post_id(post)
     stat = PostStat(likes=get_likes_count(post),
                     comments=get_comments_count(post),
-                    shares=get_shares_count(post))
-                    #views=get_views_count(post))
+                    shares=get_shares_count(post),
+                    views=get_views_count(post))
                     
                     
     if not post_obj.id:
