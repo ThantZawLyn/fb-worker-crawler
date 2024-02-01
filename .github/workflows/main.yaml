@@ -6,17 +6,22 @@ on:
       - main
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
       - name: Login to Docker Hub
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Build and push Docker image
+      - name: Build and Push Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:1.1 .
-          docker push ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:1.1
+          docker buildx build --platform linux/amd64,linux/arm64 -t ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:latest .
+          docker buildx build --platform linux/amd64,linux/arm64 -t ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:${{ github.sha }} .
+          docker push ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:${{ github.sha }}
