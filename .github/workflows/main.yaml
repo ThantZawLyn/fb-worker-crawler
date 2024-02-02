@@ -19,4 +19,4 @@ jobs:
       - name: Build and push Docker image
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/fb-worker-crawler:1.1 .
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/fb-worker-crawler:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/fb-worker-crawler:1.1
