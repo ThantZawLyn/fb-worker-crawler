@@ -1,28 +1,29 @@
 name: Build and Push Docker Image
-
 on:
   push:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ubuntu:22.04
-    
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v2
-        
-      - name: Build Docker Image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:1.1 .
-          docker tag ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:1.1 ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:${{ github.sha }}
-      
-      - name: Log in to Docker Hub
-        run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Push Docker Image
-        run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:1.1 .
-          docker push ${{ secrets.DOCKER_USERNAME }}/fb-worker-crawler:${{ github.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Build and Push to Docker Hub
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            mglue/fb-worker-crawler:1.1 .
+            mglue/fb-worker-crawler:${{ github.sha }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
     
