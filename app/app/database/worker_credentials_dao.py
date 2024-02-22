@@ -111,8 +111,7 @@ def find_task_type_working_credentials(credentials, task_type):
 def get_credentials(task_type):
     logger.log("find free credentials")
     credentials = DBSession.query(WorkerCredential).\
-        filter(and_(WorkerCredential.locked == false(), WorkerCredential.inProgress == false())). \
-        filter(WorkerCredential.locked == false()). \
+        filter(and_(WorkerCredential.attemp <= 10, WorkerCredential.inProgress == false())). \
         filter(text('((worker_credentials.last_time_finished + \'' + str(TIMEOUT_BETWEEN_ACCOUNTS_WORK) +
                     ' minute\'::interval) < \'' + str(datetime.now()) +
                     "\' or worker_credentials.last_time_finished is Null)")). \
@@ -197,7 +196,7 @@ def block_proxy(credentials):
     if credentials.proxy.attempts >= PROXY_BLOCK_ATTEMPTS:
         logger.log("Blocking proxy id: {} set available False".format(credentials.proxy.id))
         credentials.proxy.available = False
-        DBSession.delete(credentials)
+        #DBSession.delete(credentials)
     else:
         logger.log("Proxy id: {} attempts to connect: {}".format(credentials.proxy.id, credentials.proxy.attempts))
         credentials.proxy.attempts = credentials.proxy.attempts + 1
@@ -210,6 +209,7 @@ def block_account(credentials):
     logger.log("Blocking account id: {} set available False".format(credentials.account.id))
     credentials.account.available = False
     credentials.locked = True
+    credentials.attemp = credentials.attemp + 1
     credentials.account.availability_check = datetime.now()
     DBSession.commit()
 
@@ -218,6 +218,8 @@ def enable_account(credentials):
     if not credentials.account.available:
         logger.log("Enable account id: {} set available True".format(credentials.account.id))
         credentials.account.available = True
+        credentials.locked = False
+        credentials.attemp = 0
         credentials.account.availability_check = datetime.now()
         DBSession.commit()
 
