@@ -294,6 +294,7 @@ class WorkerCredential(Base):
     last_time_finished = Column('last_time_finished', DateTime)
     locked = Column('locked', Boolean)
     alive_timestamp = Column('alive_timestamp', DateTime)
+    attemp = Column('attemp', Integer)
 
     account_id = Column(Integer, ForeignKey('accounts.id'))
     proxy_id = Column('proxy_id', ForeignKey('proxy.id'))

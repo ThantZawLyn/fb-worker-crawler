@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from random import randint
 from time import sleep
 
@@ -12,6 +12,7 @@ from ..database.posts_dao import save_post
 from ..utils.url_utils import get_param
 from ..constants import *
 from ..utils.datetime_utils import parse_datetime
+from dateutil.relativedelta import relativedelta
 def get_date_time_from_post(post):
     try:
         post_date_time = post.find_element(By.CSS_SELECTOR, "abbr").text#get_attribute("data-utime")
@@ -97,11 +98,16 @@ def scroll_till_retro(browser, task, get_posts_function, get_date_from_post, par
         logger.log("start filtering by retro: {}".format(task.retro))
         retro_posts = []
         until_posts = []
+        retro_date = task.retro
+        if retro_date is None:
+            five_day_ago = datetime.today()- timedelta(days=5)
+        else:
+            five_day_ago = retro_date
         for sp in scrolled_posts:
             sp_date = get_date_from_post(sp)
             sp.fb_date = sp_date
             logger.log("date time from post: {}".format(sp_date))
-            if sp_date and sp_date > task.retro:
+            if sp_date and sp_date > five_day_ago:
                 if not task.until or sp_date < task.until:
                     logger.log("added")
                     retro_posts.append(sp)
