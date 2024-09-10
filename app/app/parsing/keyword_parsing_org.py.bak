@@ -1,0 +1,253 @@
+import re
+import traceback
+from datetime import datetime
+
+from dateutil import parser
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
+
+from .. import logger
+from ..authentication.browser import close_tab, open_tab
+from ..database.models import Content, Post, PostStat, User
+from ..database.posts_dao import get_post_by_fb_id, update_post_stat
+from ..database.users_dao import get_user_by_link
+from ..utils.count_utils import string_count_to_int
+from ..utils.datetime_utils import parse_datetime
+from ..utils.url_utils import get_param
+from ..utils.user_utils import trim_full_link
+from .common_parsing import get_fb_id, scroll_till_retro, scroll_till_the_end
+from .likes_parsing import trim_like_url
+
+
+def parse_keyword(browser, task_keyword):
+    def get_keyword_search_links(browser):
+        try:
+            return WebDriverWait(browser, 5).until(
+                ec.presence_of_all_elements_located((By.XPATH, ".//a[contains(@href, 'keywords_blended_posts')]")))
+        except Exception as e:
+            logger.exception("links 'See All' not found", e)
+
+        try:
+            return [WebDriverWait(browser, 5).until(
+                ec.presence_of_element_located((By.XPATH, ".//a[@role='radio']/span[text()='Public']/..")))]
+        except Exception as e:
+            logger.exception("Public link not found", e)
+
+        return []
+    try:
+        logger.log("start parse keywords")
+        logger.log("search keyword")
+        search_input = WebDriverWait(browser, 10).until(ec.presence_of_element_located((By.XPATH, ".//input[@data-testid='search_input']")))
+        search_input.send_keys(task_keyword.keyword)
+        search_input.submit()
+
+        logger.log("open posts link")
+        tab_link = WebDriverWait(browser, 10).until(ec.presence_of_element_located((By.XPATH, ".//li[@data-edge='keywords_blended_posts']/a")))
+        tab_link.click()
+
+        logger.log("scroll down")
+        scroll_till_the_end(browser)
+
+        logger.log("search see all links")
+        links_to_all_posts = get_keyword_search_links(browser)
+        logger.log("links_to_all_posts: {}".format(str(len(links_to_all_posts))))
+
+        for link in links_to_all_posts:
+            parse_keyword_link(browser, link, task_keyword)
+    except Exception as e:
+        logger.exception("Keyword parsing", e)
+
+
+def parse_keyword_link(browser, link, task_keyword):
+    def get_keyword_posts(browser):
+        try:
+            return WebDriverWait(browser, 5).until(
+                ec.presence_of_all_elements_located((By.XPATH, '//div[@data-gt]/div/div//div[@data-gt]/div/div/div[@data-gt]'))
+            )
+        except Exception as e:
+            logger.exception("not found posts", e)
+            return []
+
+    def get_date_time_from_post(post):
+        try:
+            date_text = post.find_element(By.XPATH, ".//a[contains(@href, 'posts') or contains(@href, 'videos') or contains(@href, 'permalink')]").text
+            logger.log("Date string: {}".format(date_text))
+            parse_text_date = parse_datetime(date_text)
+            if parse_text_date:
+                return parse_text_date
+            return parser.parse(date_text)
+        except:
+            traceback.print_exc()
+            logger.log("Date time doesn't found")
+            return None
+
+    def remove_from_scope_keyword(browser, post_ids):
+        try:
+            if post_ids and len(post_ids) > 0:
+                selectors = ', '.join(map(str, post_ids))
+                logger.log("selectors for reduce ids: {}".format(selectors))
+                browser.execute_script("var posts=document.querySelectorAll('" + selectors + "');"
+                                       "for(var i = 0; i < posts.length; i++){posts[i].removeAttribute('data-gt')}")
+        except Exception as e:
+            logger.exception("post_ids couldn't be parsed", e)
+
+    def sort_by_recent(browser):
+        try:
+            logger.log("Click to 'most recent' sorting")
+            most_recent = WebDriverWait(browser, 2).until(
+                ec.presence_of_element_located((By.XPATH, "//span[translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') = 'most recent']/.."))
+            )
+            browser.get(most_recent.get_attribute("href"))
+        except Exception as e:
+            logger.log("not found most recent button")
+
+    open_tab(browser, link.get_attribute('href'))
+    sort_by_recent(browser)
+
+    scroll_till_retro(browser, task_keyword.task, get_keyword_posts, get_date_time_from_post, parse_post_keyword, remove_from_scope_keyword)
+
+    close_tab(browser)
+    return True
+
+
+def parse_post_keyword(browser, post, task_id):
+    def get_text_from_post(post):
+        try:
+            logger.log("Getting text")
+            text_element = post.find_element_by_xpath(".//div/div[2]/div/div")
+            text = text_element.text
+            text_element_id = text_element.get_attribute('id')
+            if text_element_id:
+                browser.execute_script(f"var root = document.getElementById('{text_element_id}'); root.removeChild(root.firstChild)")
+            logger.log("Text: {}".format(text))
+            return text
+        except:
+            logger.log("text post not found")
+        return None
+
+    def get_user_from_post(post):
+        user = User()
+        try:
+            logger.log("Getting user")
+            user_element = post.find_element_by_xpath(".//span/a")
+            user.name = user_element.text
+            user.link = trim_full_link(user_element.get_attribute("href"))
+            user.fb_id = get_fb_id(user_element, user.link)
+
+            saved_user = get_user_by_link(user.link)
+            if saved_user:
+                return saved_user
+
+            logger.log("User name: {} link: {}".format(user.name, user.link))
+        except Exception as e:
+            logger.exception("User not found", e)
+        return user
+
+    def get_id_from_link(link):
+        try:
+            if not link:
+                return None
+            if "?sale_post_id" in link:
+                link = link.split("?sale_post_id")[0]
+            if "story_fbid=" in link:
+                return link.split("story_fbid=")[1].split("&")[0]
+            if link[-1:] == '/':
+                link = link[: -1]
+            return link.rsplit('/', 1)[1]
+        except Exception as e:
+            logger.exception("parse fb_post_id failed", e)
+            return link
+
+    def get_post_link(post):
+        try:
+            logger.log("Getting post target link")
+            link = post.find_element_by_xpath(".//a[contains(@href, 'posts') or contains(@href, 'videos') or contains(@href, 'permalink')]").get_attribute("href")
+            logger.log("Link: {}".format(link))
+            return link
+        except Exception as e:
+            logger.exception("Post target link", e)
+            traceback.print_exc()
+            logger.log("There are no comments in this post")
+            return None
+
+    def get_likes_link(post):
+        try:
+            logger.log("Getting likes link")
+            link = trim_like_url(post.find_element(By.XPATH, ".//a[contains(@href,'ufi')]").get_attribute("href"))
+            logger.log("Link: {}".format(link))
+            return link
+        except:
+            logger.log("Likes count doesn't found")
+        return None
+
+    def get_likes_count(post):
+        try:
+            logger.log("Getting likes count")
+            likes = post.find_element(By.XPATH, ".//a[contains(@href,'ufi')]/span/span/span").text
+            likes_count = string_count_to_int(likes)
+            logger.log("Likes count: {}".format(likes_count))
+            return str(likes_count)
+        except:
+            logger.log("Likes count doesn't found")
+        return None
+
+    def get_comments_count(post):
+        try:
+            logger.log("Getting comments count")
+            comments = post.find_element_by_xpath(".//a[(contains(@href, 'posts') or contains(@href, 'videos') or contains(@href, 'permalink')) and @role='button']").text
+            logger.log("Comments retrieved: {}".format(comments))
+            comments_count = string_count_to_int(comments)
+            logger.log("Comments count: {}".format(str(comments_count)))
+            return str(comments_count)
+        except:
+            logger.log("Comments count doesn't found")
+        return None
+
+    def get_shares_count(post):
+        try:
+            logger.log("Getting shares count")
+            shares = post.find_element(By.CSS_SELECTOR, "a[href*=shares][rel=dialog]").text
+            logger.log("Shares retrieved: {}".format(shares))
+            comments_count = string_count_to_int(shares)
+            logger.log("Shares count: {}".format(str(comments_count)))
+            return str(comments_count)
+        except:
+            logger.log("Shares count doesn't found")
+        return None
+
+    def get_post_object(post):
+        fb_post_link = get_post_link(post)
+        fb_post_id = get_id_from_link(fb_post_link)
+
+        if fb_post_id:
+            post_obj = get_post_by_fb_id(fb_post_id)
+            if not post_obj:
+                return Post(fb_post_id=fb_post_id, fb_post_link=fb_post_link)
+            else:
+                return post_obj
+        else:
+            logger.log("FB post id not found")
+
+    post_obj = get_post_object(post)
+
+    if not post_obj:
+        return None
+
+    stat = PostStat(likes=get_likes_count(post),
+                             comments=get_comments_count(post),
+                             shares=get_shares_count(post))
+    if not post_obj.id:
+        post_obj.fb_post_link_likes = get_likes_link(post)
+        post_obj.last_time_updated = datetime.now().isoformat()
+        post_obj.content = Content()
+        post_obj.user = get_user_from_post(post)
+        post_obj.date = post.fb_date
+        post_obj.task_id = task_id
+        post_obj.content = Content(text=get_text_from_post(post))
+        post_obj.stat = stat
+    else:
+        update_post_stat(post_obj, stat)
+
+    return post_obj

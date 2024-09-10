@@ -1,0 +1,94 @@
+import re
+from datetime import datetime, timedelta, time
+from dateutil import parser
+from dateutil.relativedelta import relativedelta, MO, TU, WE, TH, FR, SA, SU
+
+
+
+def parse_datetime(time_string):
+    try:
+        if re.search("Just now", time_string, re.IGNORECASE):
+            return datetime.now()
+        if re.search("at", time_string, re.IGNORECASE) and "Yesterday" not in time_string:
+            return parser.parse(time_string)
+        
+        if re.search("mins", time_string, re.IGNORECASE) or re.search("min", time_string, re.IGNORECASE) or re.search("m", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - timedelta(minutes=int(digits[0]))
+
+        if re.search("hrs", time_string, re.IGNORECASE) or re.search("hr", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - timedelta(hours=int(digits[0]))
+        if re.search("an hour ago", time_string, re.IGNORECASE):
+            return datetime.now() - timedelta(hours=1)
+        if re.search("hours ago", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - timedelta(hours=int(digits[0]))
+        if re.search("a day ago", time_string, re.IGNORECASE):
+            return datetime.now() - timedelta(days=1)
+        if re.search("days ago", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - timedelta(days=int(digits[0]))
+
+        if re.search("Yesterday at", time_string, re.IGNORECASE):
+            time_part = time_string.split("at")[-1].strip()
+            yesterday = datetime.now() - timedelta(days=1)
+            return datetime.combine(yesterday.date(), parser.parse(time_part).time())
+
+        if re.search("wks", time_string, re.IGNORECASE) or re.search("wk", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - timedelta(weeks=int(digits[0]))
+        
+        if re.search("mths", time_string, re.IGNORECASE) or re.search("mth", time_string, re.IGNORECASE) or re.search("mos", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - relativedelta(months=int(digits[0]))
+            
+        if re.search("yrs", time_string, re.IGNORECASE) or re.search("yr", time_string, re.IGNORECASE):
+            digits = re.findall(r'\d+', time_string)
+            if digits:
+                return datetime.now() - relativedelta(years=int(digits[0]))
+        
+        if re.search("on", time_string, re.IGNORECASE):
+            if re.search("on Mon", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=MO(-1))
+            if re.search("on Tue", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=TU(-1))
+            if re.search("on Wed", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=WE(-1))
+            if re.search("on Thu", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=TH(-1))
+            if re.search("on Fri", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=FR(-1))
+            if re.search("on Sat", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=SA(-1))
+            if re.search("on Sun", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=SU(-1))
+        
+        if re.search("last", time_string, re.IGNORECASE):
+            if re.search("last Mon", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=MO(-1))
+            if re.search("last Tue", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=TU(-1))
+            if re.search("last Wed", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=WE(-1))
+            if re.search("last Thu", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=TH(-1))
+            if re.search("last Fri", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=FR(-1))
+            if re.search("last Sat", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=SA(-1))
+            if re.search("last Sun", time_string, re.IGNORECASE):
+                return datetime.now() + relativedelta(weekday=SU(-1))
+        
+        # Generic date parsing fallback
+        return parser.parse(time_string)  # This line handles the 'February 13' case
+    
+    except Exception as e:
+        print(f"Error parsing date time string '{time_string}': {e}")
+        return None
