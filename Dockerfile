@@ -1,4 +1,4 @@
-FROM mglue/fb-worker-base-image:v1
+FROM mglue/fb-worker-base-image:latest
 
 WORKDIR /pysetup
 #COPY /app/requirements.txt /pysetup/
