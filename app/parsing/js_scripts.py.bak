@@ -1,0 +1,12 @@
+CLICK_OLD_DESIGN_BTN = "document.querySelector('#login_form input[type=submit]').click()"
+CLICK_NEW_DESIGN_BTN = "document.querySelector('button[name=login]').click()"
+
+XPATH_FUNC_DEF = """
+function getElementByXpath(path) {
+  return document.evaluate(path, document, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+}
+"""
+
+XPATH = """
+getElementByXpath("{0}").iterateNext()
+"""

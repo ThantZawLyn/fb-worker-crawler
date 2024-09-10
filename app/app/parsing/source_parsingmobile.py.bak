@@ -1,0 +1,478 @@
+import re
+import json
+import traceback
+from datetime import datetime
+from time import sleep
+from random import randint
+
+from selenium.webdriver import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
+
+from .common_parsing import scroll_till_retro, get_date_time_from_post, get_fb_id
+from .likes_parsing import trim_like_url
+from ..database.posts_dao import get_post_by_fb_id, update_post_stat, update_task_id
+from ..utils.count_utils import string_count_to_int
+from ..utils.user_utils import trim_full_link
+from .. import logger
+from ..constants import *
+from ..database.models import Post, Content, User, PostStat, Photo, Video
+from ..database.users_dao import get_user_by_link, get_user_by_fb_id
+
+
+def parse_source(browser, task_source):    
+    def get_source_posts(browser, retry=False):
+        try:
+            logger.log("Searching posts")
+            wait_time = 7 if not retry else 30
+            return WebDriverWait(browser, wait_time).until(
+                ec.presence_of_all_elements_located(
+                    (By.XPATH, "//div[@class='story_body_container']//ancestor::article[@id][1]"))
+            )
+        except Exception as e:
+            if not retry:
+                logger.log("try to scroll up")
+                browser.execute_script("window.scrollTo(0,document.body.scrollHeight)")
+                sleep(7)
+                return get_source_posts(browser, True)
+            else:
+                logger.exception("not found posts", e)
+        return []
+
+    def remove_from_scope_source(browser, post_ids):
+        try:
+            if post_ids and len(post_ids) > 0:
+                selectors = ', '.join(map(str, post_ids))
+                selectors = selectors.replace(':', '\\\\:')
+                selectors = selectors.replace('+', '\\\\+')
+                selectors = selectors.replace('/', '\\\\/')
+                selectors = selectors.replace('-', '\\\\-')
+                logger.log("selectors for reduce ids: {}".format(selectors))
+                browser.execute_script(
+                     "var posts=document.querySelectorAll('" + selectors + "');for(var i = 0; i < posts.length; i++){posts[i].remove()}")
+
+        except Exception as e:
+            logger.exception("post_ids couldn't be parsed", e)
+
+#    source_url = FACEBOOK_URL + task_source.source_id
+    source_url ="https://www.facebook.com/permalink.php?story_fbid=pfbid0ERisnVb3UNgQhdLmNeeqejWG1eit5Fn4HdhMzUhE9mZd8UNfHYYU6Es3TZVt6Zhyl&id=61550971700853"
+    browser.get(source_url)
+    sleep(1)
+    #browser.execute_script("window.open('');")
+    logger.log(f'Get {source_url}')   
+    sleep(1)
+    a = WebDriverWait(browser, 60).until(ec.presence_of_element_located((By.XPATH, f"//a[contains(text(),'{task_source.source_name}')]")))
+    a.click()
+    sleep(1)
+    browser.switch_to.window(browser.window_handles[1])
+
+    if browser.current_url != source_url:
+        logger.log('Current url was redirected from {} to {}'.format(source_url, browser.current_url))
+
+    scroll_till_retro(browser, task_source.task, get_source_posts, get_date_time_from_post, parse_source_post,
+                      remove_from_scope_source)
+
+
+def parse_source_post(browser, post, task_id):
+    def get_fb_post_id(post):
+        try:
+            logger.log("Getting post id")
+            #source post id rebuild in this function
+            dataft = post.get_attribute("data-store")
+            features = eval(dataft)
+            post_i = features["share_id"]
+            post_ic = str(post_i)
+            post_ie = str(post_ic.replace('226547524203272:', ''))
+            logger.log("Post unclean_id: {}.".format(post_ie))
+            pattern = r"\^M0;\^s([^-]+)-"
+            match1 = re.search(pattern, post_ie)
+            post_id = match1.group(1) if match1 else post_ie
+            logger.log("Post clean_id: {}.".format(post_id))
+            return post_id
+        except:
+            logger.log("Post id not found")
+        return None
+    def get_user(post):
+        user = User()
+        try:
+            logger.log("Getting user data")
+            user_element = post.find_element_by_xpath(".//div//strong//a")
+            user.name = user_element.text
+            user.link = trim_full_link(user_element.get_attribute("href"))
+            user_element_id = post.find_element_by_xpath("//div[@class='_67lm _77kc']")
+            dataft = user_element_id.get_attribute("data-sigil")
+            user.fb_id = dataft.replace('feed_story_ring', '')
+            #user.fb_id = task_source.source_name
+           # user.fb_id = get_fb_id(user_element, user.link)
+
+            saved_user = get_user_by_fb_id(user.fb_id)
+            if saved_user:
+                return saved_user
+
+            logger.log("User name: {} - link {} - fb_id: {}".format(user.name, user.link, user.fb_id))
+        except:
+            logger.log("User not found")
+        return user
+
+    def get_text(post):
+        logger.log("Getting post text")
+        #sleep(1)
+        more_button_click(post)
+        try:            
+            #post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']//span[@data-sigil='expose']")
+            post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']/div[@class='_5rgt _5nk5 _5msi']//p")
+            post_text="\n".join([post_text.text for post_text in post_text_root])
+            logger.log("Post text: {}".format(post_text))
+            return post_text
+        except:
+            logger.log("Text doesn't found")
+        return None    
+    
+            
+    def more_button_click(post):        
+        try:
+            more_link = WebDriverWait(post, 2).until(ec.presence_of_element_located((By.XPATH,".//span[@data-sigil='more']//a[contains(text(),'More')]")))
+            #more_link = post.find_elements(By.XPATH,".//span[@data-sigil='more']//a[contains(text(),'More')]")
+            logger.log("Click more button")
+            more_link.click()
+        except:
+            logger.log("No more button")
+    
+    '''def get_text(post):
+        try:
+            logger.log("Getting post text")
+            post_text_root= post.find_elements(By.XPATH, ".//div[@class='story_body_container']//span/p")
+            post_text="\n".join([post_text.text for post_text in post_text_root])
+            logger.log("Post text: {}".format(post_text))
+            return post_text
+        except:
+            logger.log("Text doesn't found")
+        return None'''
+       
+
+    def get_videos(browser, post):
+        try:
+            logger.log("Getting post video")
+            post_video_els = post.find_elements(By.XPATH, ".//video")
+
+            result_video_list = []
+            logger.log("Post count video {}".format(len(post_video_els)))
+            for post_video_el in post_video_els:
+                logger.log('Start sleeping for 2 seconds...')
+                sleep(2)
+                actionChains = ActionChains(browser)
+                actionChains.context_click(post_video_el).perform()
+                logger.log("Post link video {}".format(browser.current_url))
+
+                video_link = WebDriverWait(browser, 2).until(
+                    ec.presence_of_element_located((By.XPATH, './/*[text()=\'Copy video URL at current time\']/..'))
+                ).get_attribute('value')
+
+                actionChains.send_keys(Keys.ESCAPE)
+                browser.execute_script("var video_link=document.querySelector('span[value=\"" + video_link + "\"]');"
+                                                                                                             "if(video_link){video_link.remove();}")
+                result_video_list.append(video_link)
+
+            return result_video_list
+        except Exception as e:
+            actionChains = ActionChains(browser)
+            actionChains.send_keys(Keys.ESCAPE)
+            traceback.print_exc()
+            logger.log("Video doesn't found")
+        return []
+
+    def get_photos(post):
+        try:
+            logger.log("Getting post photo")
+            photo_links = post.find_elements(By.XPATH,
+                                             ".//a[contains(@href, 'photo.php?') or contains(@href, '/photos/')]"
+                                             "[not(ancestor::form[contains(@class,'commentable_item')]) and descendant::img]//img")
+
+            result_photo_list = []
+            for photo_link in photo_links:
+                logger.log("Post link photo {}".format(photo_link.get_attribute("src")))
+                result_photo_list.append(photo_link.get_attribute("src"))
+
+            return result_photo_list
+        except:
+            logger.log("Photo doesn't found")
+        return []
+
+    def get_likes_link(fb_post_id):
+        try:
+            logger.log("Getting likes link")            
+            link = FACEBOOK_URL_MOBILE_LIKE_LINK + fb_post_id
+            logger.log("Link: {}".format(link))
+            return link
+        except:
+            logger.log("Likes count doesn't found")
+        return None
+
+    def get_likes_count(post):
+        """Функция для сбора количества лайков под постом."""
+        try:
+            logger.log("Getting likes count")
+            likes = post.find_element(By.XPATH, ".//div[contains(@aria-label,'Like')]").text
+            likes_count = string_count_to_int(likes)
+            logger.log("Likes count: {}".format(likes_count))
+            return str(likes_count)
+        except:
+            logger.log("Likes count doesn't found")
+        return None
+
+    def extract_comments_str(post, fb_post_id):
+        """Извлечение из поста элемента с количеством комментариев."""
+        # TODO: refactor
+        logger.log("WOW THIS IS ACTUALLY WORKS")
+        COMMENTS_COUNT_PATTERNS = (
+            ".//form//a[contains(@href,'posts/{0}') and @role='button']",
+            ".//form//a[contains(@href,'story_fbid') and @role='button']",
+            ".//form//a[contains(@href,'photo.php?fbid=') and @role='button']",
+        )
+        for pattern in COMMENTS_COUNT_PATTERNS:
+            try:
+                return post.find_element(
+                    By.XPATH,
+                    pattern.format(fb_post_id)
+                ).text
+            except:
+                continue
+        return None
+
+    def get_comments_count_original(post, fb_post_id):
+        """Функция для сбора количества комментариев под постом."""
+        # TODO: fix issue
+        logger.log("Getting comments count for post_id: {0}".format(fb_post_id))
+
+        #comments_str = extract_comments_str(post, fb_post_id)
+        try:
+            logger.log("Getting comments count")
+            comments = post.find_element(By.XPATH, ".//article/footer//a//div/div[2]/span[1]").text
+            logger.log("Comments retrieved: {}".format(comments))
+            comments_count = string_count_to_int(comments)
+            logger.log("Comments count: {}".format(str(comments_count)))
+            return str(comments_count)
+        except:
+            logger.log("Comments count doesn't found")
+        return None
+        
+    def get_comments_count(post):
+        try:
+            logger.log("Getting Comments count")
+            comments = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[contains(text(), 'comment')]").text
+            logger.log("Comments retrieved: {}".format(comments))
+            #comments_count = comments.split(" ")[0]
+            comments_count = string_count_to_int(comments)
+            logger.log("Comments count: {}".format(str(comments_count)))
+            return str(comments_count)
+        except:
+            logger.log("Comments count doesn't found")
+        return None
+
+    """def get_post_link(browser,fb_post_id):
+        try:
+            logger.log("Getting post target link")
+            #post_id = get_fb_post_id(post)
+            post_root_link = WebDriverWait(browser, 2).until(
+                    ec.presence_of_element_located((By.XPATH, ".//a[contains(@href, 'posts')]")))#.get_attribute('value')
+            #post_root_link = post.find_element(By.CSS_SELECTOR,".//div[@class='scrollAreaBody accelerate']/a[contains(@href, 'posts')]")
+            #link = get_attribute("href")
+            post_link=post_root_link.get_attribute("href")
+            post_link=post_link.split("?")[0]
+            link=post_link+fb_post_id
+            #link = post_link.split("&")[0]
+            #link = link + fb_post_id
+            logger.log("Link: {}".format(link))
+            return link
+        except Exception as e:
+            logger.exception("Post target link", e)
+            traceback.print_exc()
+            logger.log("There are no comments in this post")
+            return None"""
+    """def get_post_link(fb_post_id):
+        try:
+            logger.log("Getting post link")            
+            link = FACEBOOK_URL_MOBILE + fb_post_id 
+            logger.log("Link: {}".format(link))
+            return link
+        except:
+            logger.log("Link doesn't found")
+        return None"""
+        
+    def get_post_link(fb_post_id):
+        try:
+            logger.log("Getting post_source id")
+            user_element_id = post.find_element_by_xpath("//div[@class='_67lm _77kc']")
+            dataft = user_element_id.get_attribute("data-sigil")
+            source_id  = dataft.replace('feed_story_ring', '')
+            #logger.log("Source id: {}.".format(source_id))
+            logger.log("Getting post target link")
+            link = 'https://m.facebook.com/story.php?story_fbid=' + fb_post_id +'&id='+source_id
+            logger.log("Link: {}".format(link))
+            return link        
+        except:
+            logger.log("Link doesn't found")
+        return None
+    
+    def get_post_link_new(fb_post_id):
+        try:
+            logger.log("Getting post_source id")
+            user_element_id = post.find_element_by_xpath("//div[@class='_67lm _77kc']")
+            dataft = user_element_id.get_attribute("data-sigil")
+            source_id  = dataft.replace('feed_story_ring', '')
+            #logger.log("Source id: {}.".format(source_id))
+            logger.log("Getting post target link")
+            link = "https://m.facebook.com/profile.php?id=" + source_id +"/posts/"+fb_post_id 
+            logger.log("Link: {}".format(link))
+            return link        
+        except:
+            logger.log("Link doesn't found")
+        return None
+
+    def get_shares_count(post):
+        try:
+            logger.log("Getting shares count")
+            shares = post.find_element(By.XPATH, ".//footer/div//a//div/div[2]/span[contains(text(), 'hare')]").text
+            logger.log("Shares retrieved: {}".format(shares))
+            shares_count = shares.split(" ")[0]
+            shares_count = string_count_to_int(shares_count)
+            logger.log("Shares count: {}".format(str(shares_count)))
+            return str(shares_count)
+        except:
+            logger.log("Shares count doesn't found")
+        return None
+    
+    def get_views_count(post):
+        try:
+            logger.log("Getting views count")            
+            video_post = post.find_element_by_css_selector("._53mw")
+            if video_post:
+                Video_url = video_post.get_attribute('data-store')
+                Video_url = json.loads(Video_url)
+                Video_url = Video_url["videoURL"]
+                logger.log("video url is {}".format(Video_url))                
+                views = get_views(Video_url)
+            return str(views)
+        except:
+            logger.log("Not video post")
+        return None
+    def get_views(url):
+        logger.log("Getting views count")
+        views_count = 0
+        try:            
+            #browser.execute_script("window.open('');")
+            browser.switch_to.window(browser.window_handles[0])
+            browser.get(url)
+            #sleep(3)
+            views =  browser.find_element(By.XPATH, "//div[contains(@class, 'x8cjs6t')]//div//div//div//span[contains(text(),'views')]|//div[@class='x1n2onr6']//div//div//div//span//span//div//div//span[contains(@class,'x193iq5w')]|//div[contains(@class, 'x8cjs6t x13fuv20 x178xt8z')]//span[contains(text(), 'plays')]|//i[@class='x1b0d499 x1d69dk1']/../../../../span[@class='_26fq']")        
+            views_count = (views.text).split(" ")[0]
+            views_count = string_count_to_int(views_count)
+            logger.log("Views count: {}".format(str(views_count)))                    
+        except:
+            logger.log("Views couldn't be parsed")                                                                     
+        #browser.close()
+        browser.switch_to.window(browser.window_handles[1])
+        return str(views_count)
+
+    def get_repost_id(post):
+        try:
+            logger.log('Getting repost id by data-testid="story-subtitle"')
+            story_subtitles = post.find_elements(By.XPATH, ".//div[@data-testid='story-subtitle']//a")
+            if len(story_subtitles) == 2:
+                repost = story_subtitles[1].get_attribute('href')
+                logger.log("repost link: {}".format(repost))
+                fb_repost_id = None
+                try:
+                    fb_repost_id = repost.split('fbid=')[1].split('&')[0]
+                except:
+                    logger.log("Couldn't parse repost_fb_id from fb_id")
+
+                try:
+                    fb_repost_id = repost.split('/permalink/')[1].split('/')[0]
+                except:
+                    logger.log("Couldn't parse repost_fb_id from permalink")
+
+                try:
+                    fb_repost_id = repost.split('/posts/')[1].split('/')[0]
+                except:
+                    logger.log("Couldn't parse repost_fb_id from posts")
+
+                if not fb_repost_id:
+                    return None, repost
+
+                logger.log("repost_id found: {}".format(fb_repost_id))
+                return fb_repost_id, repost
+        except:
+            logger.log("fb repost id coudn't parse")
+
+        try:
+            logger.log("Getting repost id by permalink")
+            repost = post.find_element(By.XPATH, ".//a[contains(@href, '/permalink/')]").get_attribute('href')
+            if not repost:
+                logger.log("no repost found")
+                return None, None
+
+            logger.log("repost link: {}".format(repost))
+            fb_repost_id = None
+            try:
+                fb_repost_id = repost.split('/permalink/')[1].split('/')[0]
+            except:
+                logger.log("Couldn't parse repost_fb_id")
+
+            if not fb_repost_id:
+                return None, repost
+
+            logger.log("repost_id found: {}".format(fb_repost_id))
+            return fb_repost_id, repost
+        except:
+            logger.log("fb repost id coudn't parse")
+        return None, None
+
+    def get_post_object(post):
+        fb_post_id = get_fb_post_id(post)
+        if fb_post_id:
+            post_obj = get_post_by_fb_id(fb_post_id)
+            if not post_obj:
+                return Post(fb_post_id=fb_post_id)
+            else:
+                return post_obj
+        else:
+            logger.log("FB post id not found")
+
+    post_obj = get_post_object(post)
+
+    if not post_obj:
+        return None
+    fb_post_id = get_fb_post_id(post)
+    stat = PostStat(likes=get_likes_count(post),
+                    comments=get_comments_count(post),
+                    shares=get_shares_count(post),
+                    views=get_views_count(post))
+                    
+                    
+    if not post_obj.id:
+        post_obj.fb_post_link = get_post_link(post_obj.fb_post_id)
+        post_obj.fb_link_new = get_post_link_new(post_obj.fb_post_id)
+        post_obj.fb_post_link_likes = get_likes_link(post_obj.fb_post_id)
+        post_obj.user = get_user(post)
+        post_obj.date = format(get_date_time_from_post(post))
+        post_obj.content = Content(text=get_text(post))
+        post_obj.last_time_updated = datetime.now().isoformat()
+        post_obj.task_id = task_id
+        post_obj.stat = stat
+        #fb_repost_id, fb_repost_link = get_repost_id(post)
+        #post_obj.fb_repost_id = fb_repost_id
+        #post_obj.fb_repost_link = fb_repost_link
+
+        """for v_link in get_videos(browser, post):
+            Video(content=post_obj.content, video_link=v_link)
+
+        for p_link in get_photos(post):
+            Photo(content=post_obj.content, photo_link=p_link)"""
+    else:
+        update_post_stat(post_obj, stat)
+        update_task_id(fb_post_id, task_id)
+
+    return post_obj

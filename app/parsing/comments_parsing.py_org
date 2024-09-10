@@ -1,0 +1,313 @@
+from datetime import datetime
+from random import randint
+from time import sleep
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
+
+from .. import logger
+from ..database import DBSession
+from ..database.models import Comment, Content, Photo, User, Video
+from ..database.subtasks_dao import save_personal_page_subtask
+from ..utils.count_utils import string_count_to_int
+from ..utils.user_utils import trim_full_link
+from .common_parsing import get_fb_id, open_post
+
+
+class CommentData:
+
+    def __init__(self, author_name, author_link, author_fb_id, image, video, text, comment_id, date, likes_count, class_name):
+        self.author_name = author_name
+        self.author_link = author_link
+        self.author_fb_id = author_fb_id
+        self.image = image
+        self.video = video
+        self.text = text
+        self.comment_id = comment_id
+        self.date = date
+        self.likes_count = likes_count
+        self.children = []
+        self.class_name = class_name
+
+    def add_children(self, children):
+        for child in children:
+            self.children.append(child)
+
+
+def parse_comment(comment):
+    def get_image_link(comment):
+        try:
+            return comment.find_element(By.XPATH, ".//a[contains(@rel, 'theater')]/img").get_attribute("src")
+        except Exception as e:
+            logger.exception("Author image parse", e)
+        return None
+
+    def get_video_link(comment):
+        try:
+            if len(comment.find_element(By.XPATH, ".//video[not(@muted)]")) == 1:
+                return comment.find_element(By.XPATH, ".//abbr[@data-tooltip-content]/ancestor::a[1]"). \
+                    get_attribute('href')
+        except Exception:
+            logger.log("Video not found in parse")
+            return None
+        return ''
+
+    def get_comment_id(comment):
+        try:
+            comment_url = comment.find_element(By.XPATH, ".//a[contains(@href, 'comment_id=')]/abbr/..").\
+                get_attribute('href')
+
+            if "reply_comment_id" in comment_url:
+                return comment_url.split('reply_comment_id=')[1].split('&')[0]
+            else:
+                return comment_url.split('comment_id=')[1].split('&')[0]
+
+        except Exception as e:
+            logger.exception("Comment id parse", e)
+        return None
+
+    def get_comment_date(comment):
+        try:
+            comment_date_timestamp = comment.find_element(By.XPATH, ".//abbr[@data-utime]").get_attribute('data-utime')
+            return datetime.utcfromtimestamp(int(comment_date_timestamp)).isoformat()
+        except Exception as e:
+            logger.log("Comment date parse")
+        return None
+
+    def get_comments_like_count(comment):
+        try:
+            text = comment.find_element(By.XPATH,
+                                        './/a[contains(@aria-label, "See who reacted to this")]'
+                                        '/child::span/following::span').text
+            return string_count_to_int(text)
+        except Exception as e:
+            logger.log("Comment like count not found in parse")
+        return 0
+
+    def get_comment_text(comment):
+        try:
+            return comment.find_element(By.XPATH,
+                                        ".//span[string-length(text()) > 0 and not(preceding-sibling::img)]").text
+        except Exception as e:
+            logger.log("Comment text count parse")
+        return None
+
+    def get_author_data(comment):
+        try:
+            author_element = comment.find_element(By.XPATH,
+                                                  ".//a[contains(@href, 'comment_id') and string-length(text()) > 0]")
+            name = author_element.text
+            link = trim_full_link(author_element.get_attribute("href"))
+            fb_id = get_fb_id(author_element, link)
+            return name, link, fb_id
+        except Exception as e:
+            logger.exception("Author data parse", e)
+        return None, None
+
+    def get_class_name(comment):
+        try:
+            classes = comment.get_attribute("class")
+            classes = classes.split(" ")
+            if "clearfix" in classes:
+                classes.remove("clearfix")
+            if len(classes) > 0:
+                return classes[0]
+            else:
+                return None
+
+        except Exception as e:
+            logger.exception("Comment class name", e)
+        return None
+
+    author_name, author_link, author_fb_id = get_author_data(comment)
+    comment_text = get_comment_text(comment)
+    image_link = get_image_link(comment)
+    video_link = get_video_link(comment)
+    comment_id = get_comment_id(comment)
+    comment_date = get_comment_date(comment)
+    comment_likes_count = get_comments_like_count(comment)
+    class_name = get_class_name(comment)
+
+    return CommentData(author_name, author_link, author_fb_id, image_link, video_link, comment_text, comment_id, comment_date,
+                       comment_likes_count, class_name)
+
+
+def parse_comments(browser, subtask):
+    def remove_from_scope(browser, comment_objects):
+        comment_classes = []
+        for co in comment_objects:
+            if co.class_name is not None:
+                comment_classes.append("." + co.class_name)
+        try:
+            if comment_classes and len(comment_classes) > 0:
+                selectors = ', '.join(map(str, comment_classes))
+                browser.execute_script(
+                    "var comments=document.querySelectorAll('" + selectors + "');"
+                    "for(var i = 0; i < comments.length; i++){comments[i].removeAttribute('aria-label')}")
+                sleep(randint(5, 7))
+        except Exception as e:
+            logger.exception("post_ids couldn't be parsed", e)
+
+    def search_comments(browser):
+        try:
+            return WebDriverWait(browser, 30).until(
+                ec.presence_of_all_elements_located((By.XPATH,
+                                                     "(//form/div/div/ul)[1]//div[contains(@aria-label, 'Comment')]")))
+        except Exception as e:
+            logger.exception("Comments parse", e)
+        return []
+
+    def search_view_more(browser):
+        try:
+            logger.log_alive()
+            logger.log("Search view N more comments button")
+            more_button = WebDriverWait(browser, 10).until(
+                ec.presence_of_element_located((By.XPATH,
+                                                "(//form[@class='commentable_item'])[1]//a/div/span[starts-with(text(), 'View')]/../../../a")))
+            more_button.click()
+        except:
+            logger.log("No view more button found. Finish parsing")
+            return False
+        return True
+
+    def click_to_select_all_comments(browser):
+        try:
+            logger.log("Search popup to select all comments selector")
+            all_comments = WebDriverWait(browser, 10).until(
+                ec.presence_of_element_located((By.XPATH,
+                                                "//ul[@role='menu']//div[@data-ordering='RANKED_UNFILTERED']/../../../../a")))
+            all_comments.click()
+            logger.log("Popup all comments selected, wait 5 second to load comments")
+            sleep(randint(3, 7))
+        except Exception as e:
+            logger.log("No select all comments popup")
+            return False
+
+    def click_to_all_comments(browser):
+        try:
+            logger.log("Select link to open popup with all comments selector")
+            select_all_comments = WebDriverWait(browser, 10).until(
+                ec.presence_of_element_located((By.XPATH, "(//form/div/div/div//a[@data-ordering])[1]")))
+            select_all_comments.click()
+        except Exception as e:
+            logger.log("No open all comments link")
+            return False
+        return True
+
+    post = subtask.post
+    open_post(browser, post.fb_post_link)
+
+    if not click_to_all_comments(browser) and not click_to_select_all_comments(browser):
+        while search_view_more(browser):
+            sleep(randint(3, 7))
+
+    while True:
+        logger.log_alive()
+        comments = search_comments(browser)
+        comment_objects = collect_root_comments(comments)
+        save_users = {u.link: u for u in DBSession.query(User).filter(User.link.in_(get_distinct_authors(comment_objects))).all()}
+        saved_comments = {c.fb_comment_id: c for c in DBSession.query(Comment).filter(Comment.fb_comment_id.in_(get_comments_fb_ids(comment_objects))).all()}
+        save_comments(None, comment_objects, save_users, saved_comments, post)
+        remove_from_scope(browser, comment_objects)
+
+        if not search_view_more(browser):
+            return
+
+
+def save_comments(parent_comment, comments, save_users, saved_comments, post):
+    def save_comment(c, parent_comment, post, save_users):
+        if c.author_link not in save_users:
+            user = User(name=c.author_name, link=c.author_link, fb_id=c.author_fb_id)
+            save_personal_page_subtask(post, user)
+            DBSession.add(user)
+        else:
+            user = save_users[c.author_link]
+
+        content = Content(text=c.text)
+        if c.image is not None:
+            photo = Photo(photo_link=c.image, content=content)
+            DBSession.add(photo)
+        if c.video is not None:
+            video = Video(video_link=c.video, content=content)
+            DBSession.add(video)
+
+        comment = Comment(post=post, user=user, content=content, fb_comment_id=c.comment_id, date=c.date,
+                          likes_count=c.likes_count)
+        if parent_comment:
+            comment.parent_comment = parent_comment
+        DBSession.add(comment)
+        logger.log("Save comment id: {} to db".format(comment.fb_comment_id))
+        return comment
+
+    def get_saved_comment(c, parent_comment, post, save_users, saved_comments):
+        if c.comment_id in saved_comments:
+            return saved_comments[c.comment_id]
+        else:
+            return save_comment(c, parent_comment, post, save_users)
+
+    for c in comments:
+        comment = get_saved_comment(c, parent_comment, post, save_users, saved_comments)
+        if len(c.children) > 0:
+            save_comments(comment, c.children, save_users, saved_comments, post)
+
+
+def collect_root_comments(comments):
+    logger.log("Begin loop of comment parse {}".format(str(len(comments))))
+    index = 1
+    comment_objects = []
+    for comment in comments:
+        logger.log("Parse {} from {}".format(str(index), str(len(comments))))
+        index += 1
+
+        root_comment = parse_comment(comment)
+        root_comment.add_children(collect_child_comments(comment))
+
+        comment_objects.append(root_comment)
+
+    return comment_objects
+
+
+def collect_child_comments(comment):
+    child_comments_data = []
+    try:
+        reply_button = comment.find_element(By.XPATH, ".//../../div[2]/div/a")
+        reply_button.click()
+        sleep(randint(3, 7))
+
+        child_comments = comment.find_elements(By.XPATH, "./../..//div[contains(@aria-label, 'Comment reply')]")
+
+        logger.log("Parse child comments")
+        index = 1
+        for child_comment in child_comments:
+            logger.log("Parse: {} child comment from: {}".format(index, len(child_comments)))
+            index += 1
+            child_comments_data.append(parse_comment(child_comment))
+    except Exception as e:
+        logger.log("Post has no comment replies")
+
+    return child_comments_data
+
+
+def get_distinct_authors(comment_objects):
+    def get_authors(comments):
+        for c in comments:
+            authors.add(c.author_link)
+            if len(c.children) > 0:
+                get_authors(c.children)
+
+    authors = set()
+    get_authors(comment_objects)
+    return authors
+
+
+def get_comments_fb_ids(comment_objects):
+    def get_comments(comments):
+        for c in comments:
+            comments_fb_ids.add(c.comment_id)
+            if len(c.children) > 0:
+                get_comments(c.children)
+
+    comments_fb_ids = set()
+    get_comments(comment_objects)
+    return comments_fb_ids

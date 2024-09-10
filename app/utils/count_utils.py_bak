@@ -1,0 +1,27 @@
+import re
+
+
+def string_count_to_int(count):
+    try:
+        if count is None or len(count) == 0:
+            return 0
+        if "K" in count:
+            return int(to_float(count) * 1000)
+        if "M" in count:
+            return int(to_float(count) * 1000000)
+
+        return to_int(count)
+    except Exception as e:
+        return count
+
+
+def to_float(count):
+    return float(re.findall(r'[\d\.\d]+', count)[0])
+
+
+def to_int(count):
+    return int(re.findall(r'[\d\.\d]+', count)[0])
+
+
+
+
